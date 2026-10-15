@@ -1,0 +1,36 @@
+# Annapoorna POS — Caddy in front of the app (https + automatic certificates).
+#
+# 1. Replace pos.example.com below with the real domain. Its DNS A record must
+#    point at this server, and ports 80 and 443 must be open to the internet
+#    (Let's Encrypt checks port 80/443 before issuing the certificate).
+# 2. Check:   caddy validate --config C:\caddy\Caddyfile
+# 3. Apply:   Restart-Service caddy
+#
+# The app listens on 127.0.0.1:4100 only (HOST=127.0.0.1 in .env), so Caddy
+# is the only way in.
+{
+	# Optional: an address Let's Encrypt can mail about certificate problems.
+	# email it@example.com
+}
+
+pos.example.com {
+	# No `encode` here: the app compresses its own responses, and compressing
+	# /api/events (live updates) would hold the messages back.
+
+	reverse_proxy 127.0.0.1:4100 {
+		# Live updates (Server-Sent Events): send each message straight away.
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	log {
+		output file C:\caddy\logs\access.log {
+			roll_size 20MiB
+			roll_keep 10
+		}
+	}
+}

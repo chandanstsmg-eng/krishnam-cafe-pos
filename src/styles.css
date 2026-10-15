@@ -1,0 +1,194 @@
+@import 'tailwindcss';
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/600.css';
+
+/*
+ * Design tokens. Warm paper background, white working surfaces, one deep
+ * green brand colour and a turmeric accent used sparingly. Status colours
+ * always travel with an icon or a word — never colour alone.
+ */
+@theme {
+  --font-sans: 'IBM Plex Sans', system-ui, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+
+  --color-paper: #f4f1ea;
+  --color-paper-2: #ebe6dc;
+  --color-surface: #ffffff;
+  --color-line: #e2dcd0;
+  --color-line-2: #cfc7b8;
+  --color-ink: #1c1a16;
+  --color-ink-2: #514c43;
+  --color-ink-3: #7d766a;
+  --color-ink-4: #a39c90;
+
+  --color-brand: #1f5b45;
+  --color-brand-600: #184b39;
+  --color-brand-700: #123a2c;
+  --color-brand-50: #eaf2ee;
+  --color-brand-100: #d4e5dc;
+  --color-brand-200: #a9cbb9;
+
+  --color-accent: #b8741a;
+  --color-accent-50: #fbf2e2;
+  --color-accent-100: #f5e1bc;
+
+  --color-ok: #2a7446;
+  --color-ok-50: #e7f3eb;
+  --color-warn: #9a5d0c;
+  --color-warn-50: #fcf1dd;
+  --color-danger: #b0271f;
+  --color-danger-50: #fbeae8;
+  --color-info: #285a98;
+  --color-info-50: #e8eff8;
+  --color-plum: #6a4a9c;
+  --color-plum-50: #f1ecf8;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+
+  --shadow-card: 0 1px 0 rgb(28 26 22 / 0.04);
+  --shadow-pop: 0 8px 24px -6px rgb(28 26 22 / 0.18), 0 2px 6px rgb(28 26 22 / 0.06);
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-rendering: optimizeLegibility;
+  }
+  html {
+    /* Stop phones enlarging text on rotate. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.45;
+    /* Notched phones in landscape: keep content clear of the cut-out. */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    overscroll-behavior-y: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+  }
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+  /*
+   * Hidden screen-reader labels (sr-only) in table headers are absolutely
+   * positioned; without this they anchor to the page and, in a wide table
+   * that scrolls sideways, stretch the whole page past the screen edge.
+   */
+  table {
+    position: relative;
+  }
+  dialog::backdrop {
+    background: rgb(28 26 22 / 0.42);
+  }
+  ::selection {
+    background: var(--color-brand-100);
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+@utility scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}
+
+/* Room for the phone's home bar under anything pinned to the bottom edge. */
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes flash-bg {
+  0% {
+    background-color: var(--color-accent-100);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-pop {
+  animation: pop-in 140ms ease-out;
+}
+.animate-flash {
+  animation: flash-bg 900ms ease-out;
+}
+
+/*
+ * Touch screens: iPhone/iPad Safari zooms the whole page into any field whose
+ * text is under 16px. Unlayered so it wins over the text-sm utilities.
+ */
+@media (pointer: coarse) {
+  input:not([type='checkbox'], [type='radio'], [type='range']),
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  body {
+    background: white;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

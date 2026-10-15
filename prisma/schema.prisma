@@ -1,0 +1,719 @@
+// Annapoorna POS — relational schema.
+// Money is stored in paise (integer) everywhere. Stock quantities are in the
+// inventory item's own unit (L, kg, pcs ...).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── People & access ─────────────────────────
+
+model Role {
+  id                 String           @id @default(cuid())
+  key                String           @unique
+  name               String
+  description        String?
+  maxDiscountPercent Int              @default(0)
+  isSystem           Boolean          @default(false)
+  permissions        RolePermission[]
+  users              User[]
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  key         String           @id
+  label       String
+  group       String
+  description String?
+  sortOrder   Int              @default(0)
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId        String
+  permissionKey String
+  role          Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permissionKey], references: [key], onDelete: Cascade)
+
+  @@id([roleId, permissionKey])
+  @@map("role_permissions")
+}
+
+/// Staff members. Every staff member who uses the system has a login here.
+model User {
+  id           String    @id @default(cuid())
+  name         String
+  username     String    @unique
+  phone        String?
+  passwordHash String
+  pinHash      String?
+  roleId       String
+  role         Role      @relation(fields: [roleId], references: [id])
+  active       Boolean   @default(true)
+  joinedOn     DateTime? @db.Date
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions        Session[]
+  ordersCreated   Order[]            @relation("OrderCreatedBy")
+  invoices        Invoice[]          @relation("InvoiceCashier")
+  payments        Payment[]
+  shifts          Shift[]            @relation("ShiftOpenedBy")
+  shiftsClosed    Shift[]            @relation("ShiftClosedBy")
+  shiftTxns       ShiftTransaction[]
+  expenses        Expense[]
+  inventoryTxns   InventoryTransaction[]
+  priceChanges    PriceChange[]
+  refunds         Refund[]           @relation("RefundBy")
+  dailyClosings   DailyClosing[]
+  reservations    Reservation[]
+
+  @@map("users")
+}
+
+model Session {
+  id         String   @id // sha256 of the cookie token
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+  ip         String?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ───────────────────────── Menu ─────────────────────────
+
+model MenuCategory {
+  id        String     @id @default(cuid())
+  name      String
+  icon      String?
+  sortOrder Int        @default(0)
+  active    Boolean    @default(true)
+  items     MenuItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("menu_categories")
+}
+
+model TaxRate {
+  id        String     @id @default(cuid())
+  name      String
+  rate      Float
+  active    Boolean    @default(true)
+  items     MenuItem[]
+  createdAt DateTime   @default(now())
+
+  @@map("tax_rates")
+}
+
+model MenuItem {
+  id            String              @id @default(cuid())
+  name          String
+  code          String?             @unique
+  description   String?
+  categoryId    String
+  category      MenuCategory        @relation(fields: [categoryId], references: [id])
+  price         Int
+  taxRateId     String?
+  taxRate       TaxRate?            @relation(fields: [taxRateId], references: [id])
+  isVeg         Boolean             @default(true)
+  available     Boolean             @default(true)
+  active        Boolean             @default(true)
+  sendToKitchen Boolean             @default(true)
+  imageUrl      String?
+  sortOrder     Int                 @default(0)
+  modifierGroups MenuModifierGroup[]
+  recipe        RecipeLine[]
+  priceChanges  PriceChange[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([categoryId])
+  @@map("menu_items")
+}
+
+model MenuModifierGroup {
+  id         String         @id @default(cuid())
+  menuItemId String
+  menuItem   MenuItem       @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  name       String
+  required   Boolean        @default(true)
+  multiple   Boolean        @default(false)
+  sortOrder  Int            @default(0)
+  options    MenuModifier[]
+
+  @@map("menu_modifier_groups")
+}
+
+model MenuModifier {
+  id         String            @id @default(cuid())
+  groupId    String
+  group      MenuModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name       String
+  priceDelta Int               @default(0)
+  isDefault  Boolean           @default(false)
+  sortOrder  Int               @default(0)
+
+  @@map("menu_modifiers")
+}
+
+model PriceChange {
+  id          String   @id @default(cuid())
+  menuItemId  String
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  oldPrice    Int
+  newPrice    Int
+  changedById String?
+  changedBy   User?    @relation(fields: [changedById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([menuItemId])
+  @@map("price_changes")
+}
+
+/// How much stock one unit of a menu item uses. Drives automatic stock
+/// deduction and the food-cost estimate.
+model RecipeLine {
+  id              String        @id @default(cuid())
+  menuItemId      String
+  menuItem        MenuItem      @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  inventoryItemId String
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  quantity        Float
+
+  @@unique([menuItemId, inventoryItemId])
+  @@map("menu_item_ingredients")
+}
+
+// ───────────────────────── Floor ─────────────────────────
+
+enum TableHold {
+  NONE
+  RESERVED
+  CLEANING
+}
+
+model DiningTable {
+  id           String        @id @default(cuid())
+  name         String        @unique
+  area         String?
+  capacity     Int           @default(4)
+  active       Boolean       @default(true)
+  hold         TableHold     @default(NONE)
+  sortOrder    Int           @default(0)
+  orders       Order[]
+  reservations Reservation[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("tables")
+}
+
+model Customer {
+  id        String    @id @default(cuid())
+  name      String?
+  phone     String?   @unique
+  notes     String?
+  orders    Order[]
+  invoices  Invoice[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("customers")
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+model Reservation {
+  id           String            @id @default(cuid())
+  customerName String
+  phone        String?
+  date         DateTime          @db.Date
+  time         String
+  guests       Int               @default(2)
+  tableId      String?
+  table        DiningTable?      @relation(fields: [tableId], references: [id])
+  notes        String?
+  status       ReservationStatus @default(PENDING)
+  createdById  String?
+  createdBy    User?             @relation(fields: [createdById], references: [id])
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([date])
+  @@map("reservations")
+}
+
+// ───────────────────────── Orders & billing ─────────────────────────
+
+enum OrderType {
+  DINE_IN
+  TAKEAWAY
+  DELIVERY
+}
+
+enum OrderStatus {
+  NEW
+  PREPARING
+  READY
+  SERVED
+  COMPLETED
+  CANCELLED
+}
+
+enum DiscountType {
+  PERCENT
+  AMOUNT
+}
+
+model Order {
+  id              String        @id
+  number          Int           @unique
+  type            OrderType
+  status          OrderStatus   @default(NEW)
+  tableId         String?
+  table           DiningTable?  @relation(fields: [tableId], references: [id])
+  customerId      String?
+  customer        Customer?     @relation(fields: [customerId], references: [id])
+  customerName    String?
+  customerPhone   String?
+  deliveryAddress String?
+  guests          Int?
+  note            String?
+  discountType    DiscountType?
+  discountValue   Float?
+  discountReason  String?
+  billPrintedAt   DateTime?
+  createdById     String
+  createdBy       User          @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  createdOffline  Boolean       @default(false)
+  cancelReason    String?
+  cancelledById   String?
+  cancelledAt     DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  items           OrderItem[]
+  tickets         KitchenTicket[]
+  invoice         Invoice?
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  id         String   @id
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId String
+  name       String
+  basePrice  Int
+  unitPrice  Int
+  modifiers  Json     @default("[]")
+  qty        Int
+  sentQty    Int      @default(0)
+  note       String?
+  taxRate    Float    @default(0)
+  kitchen    Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+enum TicketStatus {
+  NEW
+  PREPARING
+  READY
+  SERVED
+  CANCELLED
+}
+
+model KitchenTicket {
+  id        String       @id
+  orderId   String
+  order     Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  round     Int
+  status    TicketStatus @default(NEW)
+  items     Json
+  note      String?
+  createdAt DateTime     @default(now())
+  startedAt DateTime?
+  readyAt   DateTime?
+  servedAt  DateTime?
+
+  @@index([status])
+  @@map("kitchen_tickets")
+}
+
+enum InvoiceStatus {
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOID
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  number         String        @unique
+  orderId        String        @unique
+  order          Order         @relation(fields: [orderId], references: [id])
+  orderNumber    Int
+  orderType      OrderType
+  tableName      String?
+  customerId     String?
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  customerName   String?
+  customerPhone  String?
+  subtotal       Int
+  discount       Int           @default(0)
+  discountLabel  String?
+  taxable        Int
+  tax            Int           @default(0)
+  taxInclusive   Boolean       @default(false)
+  roundOff       Int           @default(0)
+  total          Int
+  paid           Int
+  change         Int           @default(0)
+  refunded       Int           @default(0)
+  costEstimate   Int?
+  status         InvoiceStatus @default(PAID)
+  cashierId      String
+  cashier        User          @relation("InvoiceCashier", fields: [cashierId], references: [id])
+  shiftId        String?
+  shift          Shift?        @relation(fields: [shiftId], references: [id])
+  businessDate   DateTime      @db.Date
+  createdOffline Boolean       @default(false)
+  reprintCount   Int           @default(0)
+  voidedAt       DateTime?
+  voidReason     String?
+  voidedById     String?
+  createdAt      DateTime      @default(now())
+  items          InvoiceItem[]
+  payments       Payment[]
+  refunds        Refund[]
+
+  @@index([businessDate])
+  @@index([createdAt])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id            String  @id @default(cuid())
+  invoiceId     String
+  invoice       Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  menuItemId    String?
+  categoryId    String?
+  categoryName  String?
+  name          String
+  modifiersText String?
+  note          String?
+  qty           Int
+  unitPrice     Int
+  lineTotal     Int
+  discountShare Int     @default(0)
+  taxRate       Float   @default(0)
+  taxAmount     Int     @default(0)
+  costEstimate  Int?
+
+  @@index([invoiceId])
+  @@index([menuItemId])
+  @@map("invoice_items")
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  method       PaymentMethod
+  amount       Int
+  tendered     Int?
+  change       Int?
+  reference    String?
+  shiftId      String?
+  shift        Shift?        @relation(fields: [shiftId], references: [id])
+  receivedById String
+  receivedBy   User          @relation(fields: [receivedById], references: [id])
+  voided       Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+
+  @@index([invoiceId])
+  @@index([createdAt])
+  @@map("payments")
+}
+
+model Refund {
+  id           String        @id @default(cuid())
+  invoiceId    String
+  invoice      Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount       Int
+  method       PaymentMethod
+  reason       String
+  byId         String
+  by           User          @relation("RefundBy", fields: [byId], references: [id])
+  approvedById String?
+  shiftId      String?
+  shift        Shift?        @relation(fields: [shiftId], references: [id])
+  createdAt    DateTime      @default(now())
+
+  @@map("refunds")
+}
+
+model Counter {
+  key   String @id
+  value Int
+
+  @@map("counters")
+}
+
+/// Commands received from POS terminals (online or replayed after going
+/// offline). The id is generated by the terminal, so a replay is a no-op.
+model SyncCommand {
+  id         String   @id
+  type       String
+  userId     String?
+  ok         Boolean
+  result     Json?
+  receivedAt DateTime @default(now())
+
+  @@map("sync_commands")
+}
+
+// ───────────────────────── Stock & suppliers ─────────────────────────
+
+model Supplier {
+  id             String          @id @default(cuid())
+  name           String
+  contactPerson  String?
+  phone          String?
+  address        String?
+  gstin          String?
+  notes          String?
+  active         Boolean         @default(true)
+  inventoryItems InventoryItem[]
+  transactions   InventoryTransaction[]
+  expenses       Expense[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@map("suppliers")
+}
+
+model InventoryItem {
+  id            String                 @id @default(cuid())
+  name          String
+  category      String
+  unit          String
+  currentStock  Float                  @default(0)
+  minStock      Float                  @default(0)
+  purchasePrice Int                    @default(0)
+  supplierId    String?
+  supplier      Supplier?              @relation(fields: [supplierId], references: [id])
+  active        Boolean                @default(true)
+  transactions  InventoryTransaction[]
+  recipeLines   RecipeLine[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  @@map("inventory_items")
+}
+
+enum InventoryTxnType {
+  OPENING
+  PURCHASE
+  CONSUMPTION
+  WASTE
+  ADJUSTMENT
+  RETURN
+}
+
+model InventoryTransaction {
+  id           String           @id @default(cuid())
+  itemId       String
+  item         InventoryItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  type         InventoryTxnType
+  quantity     Float
+  balanceAfter Float
+  unitCost     Int?
+  note         String?
+  reference    String?
+  supplierId   String?
+  supplier     Supplier?        @relation(fields: [supplierId], references: [id])
+  userId       String?
+  user         User?            @relation(fields: [userId], references: [id])
+  createdAt    DateTime         @default(now())
+
+  @@index([itemId, createdAt])
+  @@index([createdAt])
+  @@map("inventory_transactions")
+}
+
+// ───────────────────────── Money out & cash drawer ─────────────────────────
+
+model Expense {
+  id            String        @id @default(cuid())
+  category      String
+  description   String
+  amount        Int
+  date          DateTime      @db.Date
+  paymentMethod PaymentMethod @default(CASH)
+  fromDrawer    Boolean       @default(false)
+  shiftId       String?
+  shift         Shift?        @relation(fields: [shiftId], references: [id])
+  supplierId    String?
+  supplier      Supplier?     @relation(fields: [supplierId], references: [id])
+  reference     String?
+  createdById   String
+  createdBy     User          @relation(fields: [createdById], references: [id])
+  deletedAt     DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([date])
+  @@map("expenses")
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model Shift {
+  id            String             @id @default(cuid())
+  userId        String
+  user          User               @relation("ShiftOpenedBy", fields: [userId], references: [id])
+  status        ShiftStatus        @default(OPEN)
+  openedAt      DateTime           @default(now())
+  openingCash   Int
+  closedAt      DateTime?
+  closedById    String?
+  closedBy      User?              @relation("ShiftClosedBy", fields: [closedById], references: [id])
+  expectedCash  Int?
+  countedCash   Int?
+  difference    Int?
+  closingNote   String?
+  denominations Json?
+  summary       Json?
+  transactions  ShiftTransaction[]
+  invoices      Invoice[]
+  payments      Payment[]
+  refunds       Refund[]
+  expenses      Expense[]
+
+  @@index([status])
+  @@map("shifts")
+}
+
+enum ShiftTxnType {
+  CASH_IN
+  CASH_OUT
+}
+
+model ShiftTransaction {
+  id        String       @id @default(cuid())
+  shiftId   String
+  shift     Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  type      ShiftTxnType
+  amount    Int
+  reason    String
+  expenseId String?
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  createdAt DateTime     @default(now())
+
+  @@map("shift_transactions")
+}
+
+model DailyClosing {
+  id           String   @id @default(cuid())
+  businessDate DateTime @unique @db.Date
+  totals       Json
+  note         String?
+  closedById   String
+  closedBy     User     @relation(fields: [closedById], references: [id])
+  closedAt     DateTime @default(now())
+
+  @@map("daily_closings")
+}
+
+// ───────────────────────── Configuration & audit ─────────────────────────
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+enum PrinterConnection {
+  BROWSER
+  NETWORK
+}
+
+model PrinterSetting {
+  id           String            @id // "receipt" or "kitchen"
+  label        String
+  enabled      Boolean           @default(true)
+  connection   PrinterConnection @default(BROWSER)
+  printerName  String?
+  ipAddress    String?
+  port         Int               @default(9100)
+  paperWidth   Int               @default(80)
+  printLogo    Boolean           @default(true)
+  printTax     Boolean           @default(true)
+  printFooter  Boolean           @default(true)
+  footerText   String            @default("Thank you. Visit again!")
+  autoPrint    Boolean           @default(true)
+  copies       Int               @default(1)
+  openDrawer   Boolean           @default(false)
+  updatedAt    DateTime          @updatedAt
+
+  @@map("printer_settings")
+}
+
+model AuditLog {
+  id       String   @id @default(cuid())
+  at       DateTime @default(now())
+  userId   String?
+  userName String?
+  action   String
+  entity   String?
+  entityId String?
+  summary  String
+  details  Json?
+
+  @@index([at])
+  @@index([action])
+  @@map("audit_logs")
+}
