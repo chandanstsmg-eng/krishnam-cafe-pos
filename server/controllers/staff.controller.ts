@@ -7,6 +7,7 @@ import { badRequest, conflict } from '../utils/errors.js';
 import { id, optText, phone, ymd } from '../validators/common.js';
 import { PERMISSIONS } from '../../shared/permissions.js';
 import { dateOnly } from '../../shared/dates.js';
+import { PIN_ERROR, PIN_RE } from '../../shared/pin.js';
 
 export async function list(_req: Request, res: Response) {
   const [users, roles] = await Promise.all([
@@ -53,7 +54,7 @@ const userBody = z.object({
   phone,
   roleId: id,
   password: z.string().min(8, 'Use at least 8 characters').max(200).optional(),
-  pin: z.string().regex(/^\d{4,6}$/, 'PIN is 4 to 6 digits').optional(),
+  pin: z.string().regex(PIN_RE, PIN_ERROR).optional(),
   active: z.boolean().optional(),
   joinedOn: ymd.nullish(),
 });

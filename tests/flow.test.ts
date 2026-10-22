@@ -97,6 +97,18 @@ describe('a normal day at the counter', () => {
     expect(r.body.error).toBe('Username or password is incorrect.');
   });
 
+  it('accepts only 4-digit PINs', async () => {
+    const staff = (await request(app).get('/api/auth/staff')).body.staff as { id: string }[];
+    for (const pin of ['12345', '123456', '123']) {
+      const r = await request(app).post('/api/auth/pin').send({ userId: staff[0].id, pin });
+      expect(r.status, `sign-in with ${pin}`).toBe(400);
+    }
+    expect((await agents.cashier.post('/api/auth/approve').send({ pin: '22222', permission: 'discounts.apply' })).status).toBe(400);
+    const roles = (await agents.admin.get('/api/staff')).body.roles as { id: string; key: string }[];
+    const r = await agents.admin.post('/api/staff').send({ name: 'Five Digit', username: 'fivedigit', roleId: roles.find((x) => x.key === 'waiter')!.id, password: 'Waiter@1234', pin: '12345' });
+    expect(r.status).toBe(400);
+  });
+
   it('keeps kitchen staff away from billing and cashiers away from settings', async () => {
     expect((await agents.kitchen.post('/api/pos/sync').send({ commands: [] })).status).toBe(403);
     expect((await agents.cashier.put('/api/settings/billing').send({})).status).toBe(403);

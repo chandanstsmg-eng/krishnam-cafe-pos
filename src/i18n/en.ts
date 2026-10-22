@@ -93,7 +93,7 @@ const core = {
     newPassword: 'New password',
     newPin: 'New PIN',
     passwordHint: 'At least 8 characters.',
-    pinHint: '4 to 6 digits, used on the counter sign-in screen.',
+    pinHint: 'Exactly 4 digits, used on the counter sign-in screen.',
     passwordChanged: 'Password changed',
     saveFirst: 'Send or save the current order before switching user.',
   },

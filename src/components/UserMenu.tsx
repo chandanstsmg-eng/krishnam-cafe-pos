@@ -11,6 +11,7 @@ import { flush, resetPosSession } from '../services/sync';
 import { usePos } from '../features/pos/store';
 import { api, errorMessage } from '../api/client';
 import { useT } from '../i18n';
+import { PIN_LENGTH, PIN_RE, PIN_TYPING_RE } from '../../shared/pin';
 
 export function UserMenu({ area }: { area: 'pos' | 'admin' | 'kitchen' }) {
   const t = useT();
@@ -110,7 +111,7 @@ function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
       footer={
         <>
           <Button onClick={onClose}>{t('common.cancel')}</Button>
-          <Button variant="primary" onClick={submit} loading={busy} disabled={!cur || next.length < 8 || (!!pin && !/^\d{4,6}$/.test(pin))}>
+          <Button variant="primary" onClick={submit} loading={busy} disabled={!cur || next.length < 8 || (!!pin && !PIN_RE.test(pin))}>
             {t('common.save')}
           </Button>
         </>
@@ -130,7 +131,7 @@ function ChangePasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
           <Input id="pw-new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
         </Field>
         <Field label={t('user.newPin')} htmlFor="pw-pin" optional hint={t('user.pinHint')}>
-          <Input id="pw-pin" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => /^\d{0,6}$/.test(e.target.value) && setPin(e.target.value)} />
+          <Input id="pw-pin" inputMode="numeric" autoComplete="off" value={pin} maxLength={PIN_LENGTH} onChange={(e) => PIN_TYPING_RE.test(e.target.value) && setPin(e.target.value)} />
         </Field>
         {error && (
           <p role="alert" className="text-sm text-danger">

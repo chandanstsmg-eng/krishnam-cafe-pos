@@ -11,13 +11,14 @@ import { db } from '../server/db/prisma.js';
 import { hashSecret } from '../server/utils/crypto.js';
 import { DEFAULT_ROLES, PERMISSIONS } from '../shared/permissions.js';
 import { DEFAULT_SETTINGS } from '../shared/types.js';
+import { PIN_RE } from '../shared/pin.js';
 
 export async function seedClean(): Promise<{ username: string; password: string; generated: boolean }> {
   const given = process.env.ADMIN_PASSWORD?.trim() ?? '';
   const password = given.length >= 8 ? given : crypto.randomBytes(9).toString('base64url');
   const pin = process.env.ADMIN_PIN?.trim() ?? '';
   const passwordHash = await hashSecret(password);
-  const pinHash = /^\d{4,6}$/.test(pin) ? await hashSecret(pin) : null;
+  const pinHash = PIN_RE.test(pin) ? await hashSecret(pin) : null;
 
   // All or nothing: a half-made database would stop the next start.
   await db().$transaction(

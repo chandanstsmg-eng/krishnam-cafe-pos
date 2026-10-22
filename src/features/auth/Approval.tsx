@@ -9,6 +9,7 @@ import { usePos } from '../pos/store';
 import { t } from '../../i18n';
 import { cn } from '../../utils/cn';
 import type { PermissionKey } from '../../../shared/permissions';
+import { PIN_LENGTH } from '../../../shared/pin';
 
 interface Req {
   permission: PermissionKey;
@@ -44,7 +45,7 @@ export function ApprovalHost() {
   };
 
   const submit = async (value = pin) => {
-    if (!req || value.length < 4) return;
+    if (!req || value.length !== PIN_LENGTH || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -59,9 +60,13 @@ export function ApprovalHost() {
   };
 
   useEffect(() => {
+    if (pin.length === PIN_LENGTH) void submit(pin);
+  }, [pin]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!req) return;
     const onKey = (e: KeyboardEvent) => {
-      if (/^\d$/.test(e.key)) setPin((p) => applyKey(p, e.key, 6));
+      if (/^\d$/.test(e.key)) setPin((p) => applyKey(p, e.key, PIN_LENGTH));
       else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
       else if (e.key === 'Enter') {
         e.preventDefault(); // don't also 'click' whatever button has focus
@@ -83,7 +88,7 @@ export function ApprovalHost() {
           <>
             <p className="mt-3 text-[13px] text-ink-3">{t('approval.enterPin')}</p>
             <div className="my-3 flex gap-2.5" aria-label={t('approval.pinEntered', { n: pin.length })}>
-              {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
+              {Array.from({ length: PIN_LENGTH }, (_, i) => (
                 <span key={i} className={cn('h-3.5 w-3.5 rounded-full border-2', i < pin.length ? 'border-brand bg-brand' : 'border-line-2')} />
               ))}
             </div>
@@ -92,8 +97,8 @@ export function ApprovalHost() {
                 {error}
               </p>
             )}
-            <Keypad size="md" className="w-full" onKey={(k) => setPin((p) => applyKey(p, k, 6))} />
-            <Button variant="primary" size="lg" block className="mt-3" loading={busy} disabled={pin.length < 4} onClick={() => submit()}>
+            <Keypad size="md" className="w-full" onKey={(k) => setPin((p) => applyKey(p, k, PIN_LENGTH))} />
+            <Button variant="primary" size="lg" block className="mt-3" loading={busy} disabled={pin.length !== PIN_LENGTH} onClick={() => submit()}>
               {t('approval.approve')}
             </Button>
           </>

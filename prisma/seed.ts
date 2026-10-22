@@ -16,6 +16,7 @@ import { computeBill, discountLabel } from '../shared/billing.js';
 import { addDays, businessDate, dateOnly, formatDateLong, istDayStart } from '../shared/dates.js';
 import { formatMoney } from '../shared/money.js';
 import { DEFAULT_SETTINGS, type AppSettings } from '../shared/types.js';
+import { PIN_RE } from '../shared/pin.js';
 
 const HISTORY_DAYS = 60;
 const uuid = () => crypto.randomUUID();
@@ -268,7 +269,7 @@ export async function seed(opts: { quiet?: boolean } = {}) {
     roleIds[r.key] = role.id;
   }
   const pw = await hashSecret(config.demo.password || crypto.randomBytes(12).toString('base64url'));
-  const pin = async (p: string) => (/^\d{4,6}$/.test(p) ? hashSecret(p) : null);
+  const pin = async (p: string) => (PIN_RE.test(p) ? hashSecret(p) : null);
   const staffDefs = [
     { key: 'admin', name: 'Ravi Kumar', username: 'admin', role: 'admin', pin: config.demo.pins.admin, phone: '98450 11122', joined: 2016 },
     { key: 'manager', name: 'Suresh Gowda', username: 'manager', role: 'manager', pin: config.demo.pins.manager, phone: '97410 22233', joined: 2019 },

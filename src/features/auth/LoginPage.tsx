@@ -6,6 +6,7 @@ import { homeFor, setSessionUser, useSession } from './session';
 import { Button } from '../../components/ui/Button';
 import { Field, Input } from '../../components/ui/Field';
 import { Keypad, applyKey } from '../../components/ui/Keypad';
+import { PIN_LENGTH } from '../../../shared/pin';
 import { Segmented } from '../../components/ui/Segmented';
 import { BrandMark } from '../../components/BrandMark';
 import { Skeleton } from '../../components/ui/Misc';
@@ -59,7 +60,7 @@ export function LoginPage() {
   };
 
   const submitPin = async (value = pin) => {
-    if (!picked || value.length < 4 || busy) return;
+    if (!picked || value.length !== PIN_LENGTH || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -86,10 +87,15 @@ export function LoginPage() {
     }
   };
 
+  // The 4th digit signs in straight away — no need to reach for the button.
+  useEffect(() => {
+    if (pin.length === PIN_LENGTH) void submitPin(pin);
+  }, [pin]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (mode !== 'pin' || !picked) return;
     const onKey = (e: KeyboardEvent) => {
-      if (/^\d$/.test(e.key)) setPin((p) => applyKey(p, e.key, 6));
+      if (/^\d$/.test(e.key)) setPin((p) => applyKey(p, e.key, PIN_LENGTH));
       else if (e.key === 'Backspace') setPin((p) => p.slice(0, -1));
       else if (e.key === 'Enter') {
         e.preventDefault();
@@ -206,7 +212,7 @@ export function LoginPage() {
                   </div>
                 </div>
                 <div className="my-5 flex justify-center gap-3" aria-label={t('approval.pinEntered', { n: pin.length })}>
-                  {Array.from({ length: Math.max(4, pin.length) }, (_, i) => (
+                  {Array.from({ length: PIN_LENGTH }, (_, i) => (
                     <span key={i} className={cn('h-4 w-4 rounded-full border-2', i < pin.length ? 'border-brand bg-brand' : 'border-line-2')} />
                   ))}
                 </div>
@@ -215,8 +221,8 @@ export function LoginPage() {
                     {error}
                   </p>
                 )}
-                <Keypad onKey={(k) => setPin((p) => applyKey(p, k, 6))} />
-                <Button variant="primary" size="xl" block className="mt-3" loading={busy} disabled={pin.length < 4} onClick={() => submitPin()}>
+                <Keypad onKey={(k) => setPin((p) => applyKey(p, k, PIN_LENGTH))} />
+                <Button variant="primary" size="xl" block className="mt-3" loading={busy} disabled={pin.length !== PIN_LENGTH} onClick={() => submitPin()}>
                   {t('login.signIn')}
                 </Button>
               </div>

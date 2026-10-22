@@ -14,6 +14,7 @@ import { toast } from '../../components/ui/Toast';
 import { useT } from '../../i18n';
 import { cn } from '../../utils/cn';
 import { formatDateLong, formatDateTime } from '../../../shared/dates';
+import { PIN_LENGTH, PIN_RE, PIN_TYPING_RE } from '../../../shared/pin';
 
 interface StaffUser {
   id: string;
@@ -208,7 +209,7 @@ function StaffDialog({ value, roles, isSelf, onClose }: { value: StaffUser | 'ne
   });
 
   const pwShort = f.password.length > 0 && f.password.length < 8;
-  const pinBad = f.pin.length > 0 && !/^\d{4,6}$/.test(f.pin);
+  const pinBad = f.pin.length > 0 && !PIN_RE.test(f.pin);
   const canSave = f.name.trim() && f.username.trim().length >= 3 && f.roleId && (!isNew || f.password.length >= 8) && !pwShort && !pinBad;
 
   return (
@@ -269,7 +270,8 @@ function StaffDialog({ value, roles, isSelf, onClose }: { value: StaffUser | 'ne
             inputMode="numeric"
             autoComplete="new-password"
             value={f.pin}
-            onChange={(e) => /^\d{0,6}$/.test(e.target.value) && set('pin', e.target.value)}
+            maxLength={PIN_LENGTH}
+            onChange={(e) => PIN_TYPING_RE.test(e.target.value) && set('pin', e.target.value)}
             className="max-w-36"
             invalid={!!fields.pin || pinBad}
           />

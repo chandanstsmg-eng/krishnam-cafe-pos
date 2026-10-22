@@ -135,7 +135,7 @@ const en = {
     passwordHintCreate: 'At least 8 characters. Used to sign in to the back office.',
     passwordHintEdit: 'Leave empty to keep the current password. Setting a new one signs them out everywhere.',
     pinLabel: 'Counter PIN',
-    pinHintCreate: '4 to 6 digits, used to sign in quickly at the counter and to approve.',
+    pinHintCreate: 'Exactly 4 digits, used to sign in quickly at the counter and to approve.',
     pinHintEdit: 'Leave empty to keep the current PIN.',
     canSignIn: 'Can sign in',
     canSignInHint: 'Turn off when someone leaves. Their name stays on old bills.',

@@ -9,6 +9,7 @@ import { SESSION_COOKIE, toSessionUser } from '../middleware/auth.js';
 import { audit } from '../services/audit.service.js';
 import { getSettings } from '../services/settings.service.js';
 import { PERMISSIONS } from '../../shared/permissions.js';
+import { PIN_ERROR, PIN_RE } from '../../shared/pin.js';
 
 const userInclude = { role: { include: { permissions: true } } } as const;
 
@@ -52,7 +53,7 @@ export async function login(req: Request, res: Response) {
   res.json({ user: toSessionUser(user) });
 }
 
-const pinBody = z.object({ userId: z.string().min(1).max(64), pin: z.string().regex(/^\d{4,6}$/, 'PIN is 4 to 6 digits') });
+const pinBody = z.object({ userId: z.string().min(1).max(64), pin: z.string().regex(PIN_RE, PIN_ERROR) });
 
 export async function pinLogin(req: Request, res: Response) {
   const { userId, pin } = pinBody.parse(req.body);
@@ -94,7 +95,7 @@ export async function logout(req: Request, res: Response) {
 }
 
 const approveBody = z.object({
-  pin: z.string().regex(/^\d{4,6}$/, 'PIN is 4 to 6 digits'),
+  pin: z.string().regex(PIN_RE, PIN_ERROR),
   permission: z.enum(PERMISSIONS.map((p) => p.key) as [string, ...string[]]),
   reason: z.string().max(200).optional(),
 });
@@ -126,7 +127,7 @@ export async function approve(req: Request, res: Response) {
 const changeBody = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8, 'Use at least 8 characters').max(200),
-  newPin: z.string().regex(/^\d{4,6}$/).optional(),
+  newPin: z.string().regex(PIN_RE, PIN_ERROR).optional(),
 });
 
 export async function changePassword(req: Request, res: Response) {
