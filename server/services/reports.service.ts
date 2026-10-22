@@ -4,7 +4,7 @@
  */
 import { db } from '../db/prisma.js';
 import { badRequest } from '../utils/errors.js';
-import { dateOnly, istDayStart, addDays, formatDateTime } from '../../shared/dates.js';
+import { dateOnly, istDayStart, addDays, businessDate, formatDateTime } from '../../shared/dates.js';
 
 export type ColType = 'text' | 'money' | 'number' | 'qty' | 'percent' | 'date' | 'datetime';
 export interface ReportColumn {
@@ -37,6 +37,8 @@ export const REPORTS = [
   { key: 'cashiers', title: 'Cashier report' },
   { key: 'shifts', title: 'Shift report' },
   { key: 'closings', title: 'Daily closing report' },
+  { key: 'tables', title: 'Table report' },
+  { key: 'bookings', title: 'Booking report' },
 ] as const;
 
 const n = (v: unknown) => (v == null ? 0 : typeof v === 'bigint' ? Number(v) : Number(v));
@@ -517,6 +519,158 @@ export async function runReport(key: string, from: string, to: string): Promise<
         ],
         rows: out,
         totals: { date: 'Total', bills: sumCol(out, 'bills'), sales: sumCol(out, 'sales'), cash: sumCol(out, 'cash'), upi: sumCol(out, 'upi'), card: sumCol(out, 'card'), expenses: sumCol(out, 'expenses'), refunds: sumCol(out, 'refunds'), net: sumCol(out, 'net') },
+      };
+    }
+
+    case 'tables': {
+      // Every table (idle ones too), with its dine-in bills, guests, time occupied and bookings.
+      const rows = await q.$queryRaw<Record<string, unknown>[]>`
+        WITH s AS (
+          SELECT o."tableId" AS tid,
+                 count(*) AS bills,
+                 coalesce(sum(o.guests), 0) AS guests,
+                 coalesce(sum(i.total), 0) AS sales,
+                 avg(extract(epoch FROM (i."createdAt" - o."createdAt")) / 60) AS mins
+          FROM invoices i JOIN orders o ON o.id = i."orderId"
+          WHERE i.status <> 'VOID' AND i."orderType" = 'DINE_IN'
+            AND i."businessDate" BETWEEN ${from}::date AND ${to}::date
+          GROUP BY o."tableId"
+        ), c AS (
+          SELECT "tableId" AS tid, count(*) AS cancelled FROM orders
+          WHERE status = 'CANCELLED' AND type = 'DINE_IN' AND "createdAt" >= ${r.start} AND "createdAt" < ${r.end}
+          GROUP BY "tableId"
+        ), b AS (
+          SELECT "tableId" AS tid, count(*) AS bookings FROM reservations
+          WHERE date BETWEEN ${from}::date AND ${to}::date AND "tableId" IS NOT NULL
+          GROUP BY "tableId"
+        )
+        SELECT t.name, coalesce(t.area, '') AS area, t.capacity,
+               coalesce(s.bills, 0) AS bills, coalesce(s.guests, 0) AS guests, coalesce(s.sales, 0) AS sales,
+               s.mins, coalesce(b.bookings, 0) AS bookings, coalesce(c.cancelled, 0) AS cancelled
+        FROM tables t
+        LEFT JOIN s ON s.tid = t.id LEFT JOIN c ON c.tid = t.id LEFT JOIN b ON b.tid = t.id
+        WHERE t.active OR s.tid IS NOT NULL
+        ORDER BY coalesce(s.sales, 0) DESC, t."sortOrder", t.name`;
+      const totalSales = rows.reduce((a, x) => a + n(x.sales), 0);
+      const out = rows.map((x) => {
+        const bills = n(x.bills);
+        const guests = n(x.guests);
+        const sales = n(x.sales);
+        return {
+          name: String(x.name),
+          area: String(x.area),
+          seats: n(x.capacity),
+          bills,
+          guests,
+          sales,
+          avg: bills ? Math.round(sales / bills) : 0,
+          perGuest: guests ? Math.round(sales / guests) : 0,
+          minutes: x.mins == null ? null : Math.round(n(x.mins)),
+          share: totalSales ? Math.round((sales / totalSales) * 1000) / 10 : 0,
+          bookings: n(x.bookings),
+          cancelled: n(x.cancelled),
+        };
+      });
+      const bills = sumCol(out, 'bills');
+      const guests = sumCol(out, 'guests');
+      // Average time weighted by bills, so a table used once doesn't count as much as one used 30 times.
+      const minutes = bills ? Math.round(out.reduce((a, x) => a + (x.minutes ?? 0) * x.bills, 0) / bills) : 0;
+      const busiest = out.find((x) => x.bills > 0);
+      return {
+        ...base,
+        columns: [
+          { key: 'name', label: 'Table', type: 'text' },
+          { key: 'area', label: 'Area', type: 'text' },
+          { key: 'seats', label: 'Seats', type: 'number' },
+          { key: 'bills', label: 'Bills', type: 'number' },
+          { key: 'guests', label: 'Guests', type: 'number' },
+          { key: 'sales', label: 'Sales', type: 'money' },
+          { key: 'avg', label: 'Avg bill', type: 'money' },
+          { key: 'perGuest', label: 'Per guest', type: 'money' },
+          { key: 'minutes', label: 'Avg time (min)', type: 'number' },
+          { key: 'share', label: 'Share', type: 'percent' },
+          { key: 'bookings', label: 'Bookings', type: 'number' },
+          { key: 'cancelled', label: 'Cancelled orders', type: 'number' },
+        ],
+        rows: out,
+        totals: {
+          name: 'Total',
+          bills,
+          guests,
+          sales: totalSales,
+          avg: bills ? Math.round(totalSales / bills) : 0,
+          perGuest: guests ? Math.round(totalSales / guests) : 0,
+          minutes: bills ? minutes : null,
+          share: totalSales ? 100 : 0,
+          bookings: sumCol(out, 'bookings'),
+          cancelled: sumCol(out, 'cancelled'),
+        },
+        summary: [
+          { label: 'Dine-in sales', value: totalSales, type: 'money' },
+          { label: 'Table bills', value: bills, type: 'number' },
+          { label: 'Guests served', value: guests, type: 'number' },
+          { label: 'Avg time at table (min)', value: minutes, type: 'number' },
+        ],
+        note: `Dine-in bills only. Time at table = from the first order to payment.${busiest ? ` Busiest table: ${busiest.name}.` : ''} Guests are counted only when entered on the order.`,
+      };
+    }
+
+    case 'bookings': {
+      const list = await q.reservation.findMany({
+        where: { date: { gte: r.f, lte: r.t } },
+        include: { table: { select: { name: true } }, createdBy: { select: { name: true } } },
+        orderBy: [{ date: 'asc' }, { time: 'asc' }],
+      });
+      const today = businessDate();
+      const to12h = (hhmm: string) => {
+        const [h, m] = hhmm.split(':').map(Number);
+        return Number.isFinite(h) ? `${((h + 11) % 12) + 1}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}` : hhmm;
+      };
+      const out = list.map((b) => {
+        const date = b.date.toISOString().slice(0, 10);
+        const open = b.status === 'PENDING' || b.status === 'CONFIRMED';
+        const status = b.status === 'COMPLETED' ? 'Came' : b.status === 'CANCELLED' ? 'Cancelled' : open && date < today ? 'Not marked (no-show?)' : b.status === 'CONFIRMED' ? 'Confirmed' : 'Booked';
+        return {
+          date,
+          time: to12h(b.time),
+          name: b.customerName,
+          phone: b.phone ?? '',
+          guests: b.guests,
+          table: b.table?.name ?? '',
+          status,
+          notes: b.notes ?? '',
+          by: b.createdBy?.name ?? '',
+          bookedOn: b.createdAt.toISOString(),
+        };
+      });
+      const count = (s: string) => out.filter((x) => x.status === s).length;
+      const came = count('Came');
+      const cancelled = count('Cancelled');
+      const noShow = count('Not marked (no-show?)');
+      const decided = came + cancelled + noShow;
+      return {
+        ...base,
+        columns: [
+          { key: 'date', label: 'Date', type: 'date' },
+          { key: 'time', label: 'Time', type: 'text' },
+          { key: 'name', label: 'Customer', type: 'text' },
+          { key: 'phone', label: 'Phone', type: 'text' },
+          { key: 'guests', label: 'Guests', type: 'number' },
+          { key: 'table', label: 'Table', type: 'text' },
+          { key: 'status', label: 'Status', type: 'text' },
+          { key: 'notes', label: 'Notes', type: 'text' },
+          { key: 'by', label: 'Booked by', type: 'text' },
+          { key: 'bookedOn', label: 'Booked on', type: 'datetime' },
+        ],
+        rows: out,
+        totals: { date: 'Total', guests: sumCol(out, 'guests'), name: `${out.length} bookings` },
+        summary: [
+          { label: 'Bookings', value: out.length, type: 'number' },
+          { label: 'Guests booked', value: sumCol(out, 'guests'), type: 'number' },
+          { label: 'Came', value: came, type: 'number' },
+          { label: 'Show-up rate', value: decided ? Math.round((came / decided) * 1000) / 10 : 0, type: 'percent' },
+        ],
+        note: `Cancelled: ${cancelled}. Not marked after the date (possible no-shows): ${noShow}. Show-up rate = came ÷ (came + cancelled + not marked).`,
       };
     }
   }

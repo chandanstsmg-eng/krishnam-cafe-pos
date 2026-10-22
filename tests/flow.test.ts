@@ -109,6 +109,28 @@ describe('a normal day at the counter', () => {
     expect(r.status).toBe(400);
   });
 
+  it('reports sales per table and customer bookings', async () => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const monthAgo = new Date(Date.now() - 30 * 86400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+    const tables = (await agents.admin.get(`/api/reports/tables?from=${monthAgo}&to=${today}`)).body;
+    expect(tables.columns.map((c: { key: string }) => c.key)).toContain('minutes');
+    expect(tables.rows.length).toBeGreaterThanOrEqual(boot.tables.length); // idle tables are listed too
+    expect(tables.totals.bills).toBeGreaterThan(0);
+    expect(tables.totals.sales).toBe(tables.rows.reduce((a: number, r: { sales: number }) => a + r.sales, 0));
+    expect((await agents.admin.get(`/api/reports/tables?from=${monthAgo}&to=${today}&format=csv`)).text).toContain('Avg time (min)');
+
+    const tomorrow = new Date(Date.now() + 86400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const made = await agents.cashier.post('/api/reservations').send({ customerName: 'Report Test Guest', phone: '9876543210', date: tomorrow, time: '19:30', guests: 4, tableId: boot.tables[0].id });
+    expect(made.status, JSON.stringify(made.body)).toBeLessThan(300);
+    const bookings = (await agents.admin.get(`/api/reports/bookings?from=${today}&to=${tomorrow}`)).body;
+    const row = bookings.rows.find((r: { name: string }) => r.name === 'Report Test Guest');
+    expect(row).toMatchObject({ time: '7:30 PM', guests: 4, table: boot.tables[0].name, status: 'Booked' });
+    expect(bookings.summary[0].value).toBe(bookings.rows.length);
+
+    expect((await agents.cashier.get(`/api/reports/tables?from=${today}&to=${today}`)).status).toBe(403);
+  });
+
   it('keeps kitchen staff away from billing and cashiers away from settings', async () => {
     expect((await agents.kitchen.post('/api/pos/sync').send({ commands: [] })).status).toBe(403);
     expect((await agents.cashier.put('/api/settings/billing').send({})).status).toBe(403);
