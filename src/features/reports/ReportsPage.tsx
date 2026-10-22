@@ -89,7 +89,8 @@ export default function ReportsPage() {
   const [range, setRange] = useState(() => presetRange('today'));
   const today = businessDate();
 
-  const list = useQuery({ queryKey: ['reports'], queryFn: () => api.get<ReportMeta[]>('/reports'), staleTime: Infinity });
+  // Re-checked now and then: new reports appear after an update without closing the tab.
+  const list = useQuery({ queryKey: ['reports'], queryFn: () => api.get<ReportMeta[]>('/reports'), staleTime: 5 * 60_000 });
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.get<{ settings: AppSettings }>('/settings'), staleTime: 60_000 });
   const reports = list.data ?? [];
   const key = params.get('key') || 'sales';

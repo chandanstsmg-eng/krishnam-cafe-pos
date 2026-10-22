@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "tsx server/index.ts",
-    "dev": "tsx server/index.ts --dev",
+    "dev": "tsx watch --clear-screen=false --exclude \"src/**\" --exclude \"data/**\" --exclude \"dist/**\" server/index.ts --dev",
     "build": "vite build",
     "db:stop": "tsx scripts/db-stop.ts",
     "prisma": "tsx scripts/prisma.ts",

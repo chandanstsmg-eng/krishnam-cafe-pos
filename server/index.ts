@@ -158,7 +158,8 @@ async function main() {
     server.closeAllConnections?.();
     await new Promise((r) => server.close(() => r(null)));
     await disconnect();
-    await stopDatabase();
+    // `npm run dev` restarts on code changes with SIGTERM: keep the database up for the next start.
+    if (!(dev && signal === 'SIGTERM')) await stopDatabase();
     console.log('  Stopped safely. Goodbye.\n');
     process.exit(0);
   };
