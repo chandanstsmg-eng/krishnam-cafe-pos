@@ -1,9 +1,12 @@
+import { useState } from 'react';
 import { Link } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { ArrowRight, Package, Receipt, Utensils } from 'lucide-react';
-import { api, errorMessage } from '../../api/client';
+import { api, errorMessage, qs } from '../../api/client';
 import { useLive } from '../../hooks/useLive';
 import { Button } from '../../components/ui/Button';
+import { Segmented } from '../../components/ui/Segmented';
+import { CardRangeFilter, rangeText, useCardRange } from './CardRangeFilter';
 import { EmptyState, PageHeader, Panel, Skeleton, Stat } from '../../components/ui/Misc';
 import { useT } from '../../i18n';
 import { cn } from '../../utils/cn';
@@ -94,16 +97,6 @@ function Loaded({ d, dayName }: { d: DashboardData; dayName: string }) {
   const td = d.today;
   const lastWeekDay = t('dashboard.lastDay', { day: dayName });
 
-  // Hours with sales, padded to a normal trading day so the shape reads.
-  const hours = d.hourly.map((h) => h.hour);
-  const first = Math.min(7, ...hours);
-  const last = Math.max(21, ...hours);
-  const hourly: SeriesPoint[] = [];
-  for (let h = first; h <= last; h++) {
-    const row = d.hourly.find((x) => x.hour === h);
-    hourly.push({ label: hourLabel(h), title: `${hourLabel(h)} – ${hourLabel((h + 1) % 24)}`, sales: row?.sales ?? 0, bills: row?.bills ?? 0 });
-  }
-
   const days: SeriesPoint[] = d.days.map((x) => {
     const isToday = x.date === td.date;
     const short = formatDayShort(x.date); // "Sat, 27 Sep"
@@ -149,35 +142,14 @@ function Loaded({ d, dayName }: { d: DashboardData; dayName: string }) {
       </section>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel title={t('dashboard.byHour')} subtitle={t('dashboard.byHourHint')}>
-          {td.bills === 0 ? (
-            <EmptyState icon={<Receipt />} title={t('dashboard.noSalesYet')} className="py-10" />
-          ) : (
-            <SalesColumns data={hourly} ariaLabel={t('dashboard.byHour')} />
-          )}
-        </Panel>
+        <HourlyCard />
+
         <Panel title={t('dashboard.last14')} subtitle={t('dashboard.last7Total', { amount: formatMoney(weekTotal) })}>
           <SalesColumns data={days} ariaLabel={t('dashboard.last14')} />
           <p className="mt-2 text-[12px] text-ink-3">{t('dashboard.todayLight')}</p>
         </Panel>
 
-        <Panel title={t('dashboard.topItems')} subtitle={t('dashboard.topItemsHint')}>
-          {d.topItems.length === 0 ? (
-            <EmptyState icon={<Utensils />} title={t('dashboard.noItemsYet')} className="py-10" />
-          ) : (
-            <ol className="divide-y divide-line">
-              {d.topItems.map((it, i) => (
-                <li key={it.name} className="flex items-baseline gap-3 py-2 text-sm">
-                  <span className="num w-5 shrink-0 text-right text-ink-3">{i + 1}.</span>
-                  <span className="min-w-0 flex-1 truncate text-ink">
-                    {it.name} <span className="text-ink-3">— {t('dashboard.sold', { n: formatNum(it.qty) })}</span>
-                  </span>
-                  <span className="num shrink-0 text-ink-2">{formatMoney(it.sales)}</span>
-                </li>
-              ))}
-            </ol>
-          )}
-        </Panel>
+        <TopItemsCard />
 
         <div className="space-y-4">
           <Panel
@@ -235,6 +207,90 @@ function Loaded({ d, dayName }: { d: DashboardData; dayName: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Sales by hour of the day, for the period picked on the card. */
+function HourlyCard() {
+  const t = useT();
+  const [range, setRange] = useCardRange();
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard', 'hourly', range.from, range.to],
+    queryFn: () => api.get<{ hourly: { hour: number; sales: number; bills: number }[] }>(`/dashboard/hourly${qs({ from: range.from, to: range.to })}`),
+    placeholderData: keepPreviousData,
+  });
+  const rows = data?.hourly ?? [];
+  // Hours with sales, padded to a normal trading day so the shape reads.
+  const hours = rows.map((h) => h.hour);
+  const first = Math.min(7, ...hours);
+  const last = Math.max(21, ...hours);
+  const hourly: SeriesPoint[] = [];
+  for (let h = first; h <= last; h++) {
+    const row = rows.find((x) => x.hour === h);
+    hourly.push({ label: hourLabel(h), title: `${hourLabel(h)} – ${hourLabel((h + 1) % 24)}`, sales: row?.sales ?? 0, bills: row?.bills ?? 0 });
+  }
+  const today = range.preset === 'today';
+  return (
+    <Panel title={t('dashboard.byHour')} subtitle={rangeText(range, t)} action={<CardRangeFilter id="hourly-range" value={range} onChange={setRange} />}>
+      {isLoading && !data ? (
+        <Skeleton className="h-48" />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<Receipt />} title={today ? t('dashboard.noSalesYet') : t('dashboard.noSalesInRange')} className="py-10" />
+      ) : (
+        <SalesColumns data={hourly} ariaLabel={t('dashboard.byHour')} />
+      )}
+      {range.from !== range.to && rows.length > 0 && <p className="mt-2 text-[12px] text-ink-3">{t('dashboard.hourlyAddedUp')}</p>}
+    </Panel>
+  );
+}
+
+/** Best sellers for the period picked on the card, by quantity or by sales. */
+function TopItemsCard() {
+  const t = useT();
+  const [range, setRange] = useCardRange();
+  const [by, setBy] = useState<'qty' | 'sales'>('qty');
+  const { data, isLoading } = useQuery({
+    queryKey: ['dashboard', 'top-items', range.from, range.to, by],
+    queryFn: () => api.get<{ items: { name: string; qty: number; sales: number }[] }>(`/dashboard/top-items${qs({ from: range.from, to: range.to, by, limit: 10 })}`),
+    placeholderData: keepPreviousData,
+  });
+  const items = data?.items ?? [];
+  return (
+    <Panel
+      title={t('dashboard.topItemsTitle')}
+      subtitle={`${rangeText(range, t)} · ${by === 'qty' ? t('dashboard.byQty') : t('dashboard.bySales')}`}
+      action={<CardRangeFilter id="top-range" value={range} onChange={setRange} />}
+    >
+      <div className="mb-2 flex justify-end">
+        <Segmented
+          label={t('dashboard.rankBy')}
+          size="sm"
+          value={by}
+          onChange={setBy}
+          options={[
+            { value: 'qty', label: t('dashboard.byQty') },
+            { value: 'sales', label: t('dashboard.bySales') },
+          ]}
+        />
+      </div>
+      {isLoading && !data ? (
+        <Skeleton className="h-48" />
+      ) : items.length === 0 ? (
+        <EmptyState icon={<Utensils />} title={range.preset === 'today' ? t('dashboard.noItemsYet') : t('dashboard.noItemsInRange')} className="py-10" />
+      ) : (
+        <ol className="divide-y divide-line">
+          {items.map((it, i) => (
+            <li key={it.name} className="flex items-baseline gap-3 py-2 text-sm">
+              <span className="num w-5 shrink-0 text-right text-ink-3">{i + 1}.</span>
+              <span className="min-w-0 flex-1 truncate text-ink">
+                {it.name} <span className="text-ink-3">— {t('dashboard.sold', { n: formatNum(it.qty) })}</span>
+              </span>
+              <span className="num shrink-0 text-ink-2">{formatMoney(it.sales)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Panel>
   );
 }
 

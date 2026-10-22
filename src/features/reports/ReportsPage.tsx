@@ -11,9 +11,10 @@ import { printPage } from '../../services/print';
 import { useT } from '../../i18n';
 import { cn } from '../../utils/cn';
 import { formatMoney, formatMoneyAscii } from '../../../shared/money';
-import { addDays, businessDate, formatDate, formatDateLong, formatDateTime } from '../../../shared/dates';
+import { businessDate, formatDate, formatDateLong, formatDateTime } from '../../../shared/dates';
 import type { AppSettings } from '../../../shared/types';
 import { formatNum } from './charts';
+import { presetRange, type Preset } from './ranges';
 
 type ColType = 'text' | 'money' | 'number' | 'qty' | 'percent' | 'date' | 'datetime';
 type Cell = string | number | null | undefined;
@@ -33,31 +34,6 @@ interface Report {
   totals?: Record<string, Cell>;
   summary?: { label: string; value: number; type: ColType }[];
   note?: string;
-}
-
-type Preset = 'today' | 'yesterday' | 'week' | 'month' | 'lastMonth' | 'custom';
-
-function presetRange(p: Exclude<Preset, 'custom'>, today = businessDate()): { from: string; to: string } {
-  switch (p) {
-    case 'today':
-      return { from: today, to: today };
-    case 'yesterday': {
-      const y = addDays(today, -1);
-      return { from: y, to: y };
-    }
-    case 'week': {
-      // Week starts on Monday.
-      const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
-      return { from: addDays(today, -((dow + 6) % 7)), to: today };
-    }
-    case 'month':
-      return { from: `${today.slice(0, 7)}-01`, to: today };
-    case 'lastMonth': {
-      const firstThis = `${today.slice(0, 7)}-01`;
-      const lastPrev = addDays(firstThis, -1);
-      return { from: `${lastPrev.slice(0, 7)}-01`, to: lastPrev };
-    }
-  }
 }
 
 const isNumeric = (t: ColType) => t === 'money' || t === 'number' || t === 'qty' || t === 'percent';

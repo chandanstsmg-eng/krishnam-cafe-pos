@@ -3,13 +3,14 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { db } from '../db/prisma.js';
 import * as shifts from '../services/shifts.service.js';
-import { analytics, dashboard } from '../services/dashboard.service.js';
+import { analytics, dashboard, hourlySales, topItems } from '../services/dashboard.service.js';
+import { badRequest } from '../utils/errors.js';
 import { REPORTS, reportToCsv, runReport } from '../services/reports.service.js';
 import { closeDay, closingPreview, listClosings } from '../services/closing.service.js';
 import { notifications } from '../services/notifications.service.js';
 import { searchInvoices } from '../services/invoices.service.js';
 import { paise, ymd } from '../validators/common.js';
-import { businessDate } from '../../shared/dates.js';
+import { addDays, businessDate } from '../../shared/dates.js';
 import { can } from '../middleware/auth.js';
 
 // ── Shifts ──
@@ -37,6 +38,27 @@ export async function closeShift(req: Request, res: Response) {
 
 // ── Dashboard & analytics ──
 export const getDashboard = async (_req: Request, res: Response) => res.json(await dashboard());
+
+/** from/to for a dashboard card filter: defaults to today, at most a year. */
+function cardRange(query: Request['query']) {
+  const today = businessDate();
+  const q = z.object({ from: ymd.default(today), to: ymd.default(today) }).parse(query);
+  if (q.from > q.to) throw badRequest('The start date is after the end date.');
+  if (q.from < addDays(q.to, -366)) throw badRequest('Choose a range of one year or less.');
+  return q;
+}
+
+export async function getHourly(req: Request, res: Response) {
+  const { from, to } = cardRange(req.query);
+  res.json(await hourlySales(from, to));
+}
+
+export async function getTopItems(req: Request, res: Response) {
+  const { from, to } = cardRange(req.query);
+  const by = z.enum(['qty', 'sales']).catch('qty').parse(req.query.by);
+  const limit = z.coerce.number().int().min(1).max(50).catch(10).parse(req.query.limit);
+  res.json(await topItems(from, to, by, limit));
+}
 
 export async function getAnalytics(req: Request, res: Response) {
   const period = z.enum(['today', 'week', 'month', 'year']).catch('week').parse(req.query.period);

@@ -133,6 +133,8 @@ r.delete('/expenses/:id', allow('expenses.manage'), h(expenses.remove));
 
 // ── Owner ──
 r.get('/dashboard', allow('reports.view'), h(office.getDashboard));
+r.get('/dashboard/hourly', allow('reports.view'), h(office.getHourly));
+r.get('/dashboard/top-items', allow('reports.view'), h(office.getTopItems));
 r.get('/analytics', allow('reports.view'), h(office.getAnalytics));
 r.get('/reports', allow('reports.view'), office.reportList);
 r.get('/reports/:key', allow('reports.view'), h(office.report));

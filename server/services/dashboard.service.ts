@@ -111,6 +111,26 @@ export async function dashboard() {
   };
 }
 
+/** Sales per hour of the day, added up over a date range (dashboard card filter). */
+export async function hourlySales(from: string, to: string) {
+  const rows = await db().$queryRaw<{ hour: number; sales: unknown; bills: unknown }[]>`
+    SELECT extract(hour FROM ("createdAt" AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Kolkata')::int AS hour, sum(total) AS sales, count(*) AS bills
+    FROM invoices WHERE status <> 'VOID' AND "businessDate" BETWEEN ${from}::date AND ${to}::date GROUP BY 1 ORDER BY 1`;
+  return { from, to, hourly: rows.map((h) => ({ hour: h.hour, sales: n(h.sales), bills: n(h.bills) })) };
+}
+
+/** Best sellers over a date range, by quantity or by sales (dashboard card filter). */
+export async function topItems(from: string, to: string, by: 'qty' | 'sales', limit: number) {
+  const rows = await db().$queryRaw<{ name: string; qty: unknown; sales: unknown }[]>`
+    SELECT ii.name, sum(ii.qty) AS qty, sum(ii."lineTotal") AS sales
+    FROM invoice_items ii JOIN invoices i ON i.id = ii."invoiceId"
+    WHERE i.status <> 'VOID' AND i."businessDate" BETWEEN ${from}::date AND ${to}::date
+    GROUP BY ii.name`;
+  const items = rows.map((x) => ({ name: x.name, qty: n(x.qty), sales: n(x.sales) }));
+  items.sort((a, b) => (by === 'qty' ? b.qty - a.qty || b.sales - a.sales : b.sales - a.sales || b.qty - a.qty));
+  return { from, to, by, items: items.slice(0, limit) };
+}
+
 type Period = 'today' | 'week' | 'month' | 'year';
 
 export async function analytics(period: Period) {

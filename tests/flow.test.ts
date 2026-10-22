@@ -131,6 +131,24 @@ describe('a normal day at the counter', () => {
     expect((await agents.cashier.get(`/api/reports/tables?from=${today}&to=${today}`)).status).toBe(403);
   });
 
+  it('filters the dashboard hourly and top-items cards by date', async () => {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const monthAgo = new Date(Date.now() - 30 * 86400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+
+    const hourly = (await agents.admin.get(`/api/dashboard/hourly?from=${monthAgo}&to=${today}`)).body;
+    expect(hourly.hourly.length).toBeGreaterThan(0);
+    expect(hourly.hourly.every((h: { hour: number }) => h.hour >= 0 && h.hour <= 23)).toBe(true);
+
+    const byQty = (await agents.admin.get(`/api/dashboard/top-items?from=${monthAgo}&to=${today}&by=qty&limit=10`)).body.items as { qty: number; sales: number }[];
+    const bySales = (await agents.admin.get(`/api/dashboard/top-items?from=${monthAgo}&to=${today}&by=sales&limit=10`)).body.items as { qty: number; sales: number }[];
+    expect(byQty).toHaveLength(10);
+    expect(byQty.every((x, i) => i === 0 || byQty[i - 1].qty >= x.qty)).toBe(true);
+    expect(bySales.every((x, i) => i === 0 || bySales[i - 1].sales >= x.sales)).toBe(true);
+
+    expect((await agents.admin.get(`/api/dashboard/hourly?from=${today}&to=${monthAgo}`)).status).toBe(400);
+    expect((await agents.cashier.get(`/api/dashboard/top-items`)).status).toBe(403);
+  });
+
   it('keeps kitchen staff away from billing and cashiers away from settings', async () => {
     expect((await agents.kitchen.post('/api/pos/sync').send({ commands: [] })).status).toBe(403);
     expect((await agents.cashier.put('/api/settings/billing').send({})).status).toBe(403);
