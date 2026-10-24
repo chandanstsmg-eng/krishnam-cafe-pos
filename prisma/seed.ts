@@ -238,7 +238,7 @@ export async function seed(opts: { quiet?: boolean } = {}) {
       name: 'Krishnam Cafe',
       tagline: 'Brew · Bite · Bliss',
       address: 'NH 75, Near KSRTC Bus Stand',
-      city: 'Kunigal',
+      city: '',
       state: 'Karnataka',
       pincode: '572130',
       phone: '98765 43210',

@@ -40,7 +40,7 @@ write-ahead log protects every bill that was saved.
 
 ## Demo sign-in
 
-The demo café is **Annapoorna Café & Hotel**, Kunigal, with 60 days of simulated trading.
+The demo café is **Krishnam Cafe**, with 60 days of simulated trading.
 The password and PINs are in the `.env` file (`DEMO_PASSWORD`, `DEMO_PIN_*`), not in the code.
 
 | Username | Role | PIN | Lands on |
