@@ -7,6 +7,18 @@
   "engines": {
     "node": ">=20"
   },
+  "allowScripts": {
+    "prisma": true,
+    "@prisma/client": true,
+    "@prisma/engines": true,
+    "esbuild": true,
+    "@embedded-postgres/windows-x64": true,
+    "@embedded-postgres/linux-x64": true,
+    "@embedded-postgres/linux-arm64": true,
+    "@embedded-postgres/darwin-arm64": true,
+    "@embedded-postgres/darwin-x64": true,
+    "core-js": false
+  },
   "scripts": {
     "start": "tsx server/index.ts",
     "dev": "tsx watch --clear-screen=false --exclude \"src/**\" --exclude \"data/**\" --exclude \"dist/**\" server/index.ts --dev",

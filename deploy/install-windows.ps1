@@ -40,6 +40,11 @@ if ($major -lt 20) { throw "Node.js $(& $node -v) is too old. Install Node.js 22
 if ($node -like "$env:USERPROFILE*") { throw "Node.js is installed only for your user ($node). Install it for all users (default installer, C:\Program Files\nodejs) so the service account can run it." }
 Done "Node.js $(& $node -v) at $node"
 
+# Decide now whether this is a fresh setup: stopping the database below loads the app's
+# config, which writes a demo-default .env if there is none.
+$envFile = Join-Path $AppDir '.env'
+$hadEnv = Test-Path $envFile
+
 # -- Stop a running copy (re-install): Windows can't replace files of a running database --
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
   Step 'Stopping the running app and its database'
@@ -50,6 +55,7 @@ if (Test-Path (Join-Path $AppDir 'node_modules\tsx\dist\cli.mjs')) {
   Push-Location $AppDir
   try { & $node 'node_modules\tsx\dist\cli.mjs' 'scripts\db-stop.ts' } finally { Pop-Location }
 }
+if (-not $hadEnv) { Remove-Item $envFile -ErrorAction SilentlyContinue }
 
 # -- Packages --
 Step 'Installing packages (npm ci)'
@@ -64,7 +70,6 @@ Done 'Packages installed'
 
 # -- .env --
 Step 'Configuration (.env)'
-$envFile = Join-Path $AppDir '.env'
 function Secret { $b = New-Object byte[] 24; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b).TrimEnd('=').Replace('+', '-').Replace('/', '_') }
 function Set-EnvLine([string]$text, [string]$key, [string]$value) {
   $line = "$key=$value"
@@ -72,7 +77,7 @@ function Set-EnvLine([string]$text, [string]$key, [string]$value) {
   if ($re.IsMatch($text)) { return $re.Replace($text, [Text.RegularExpressions.MatchEvaluator] { param($m) $line }, 1) }
   return $text.TrimEnd() + "`r`n$line`r`n"
 }
-if (Test-Path $envFile) {
+if ($hadEnv -and (Test-Path $envFile)) {
   $text = [IO.File]::ReadAllText($envFile)
   Done '.env already exists - keeping its secrets'
 } else {
@@ -103,9 +108,13 @@ if (Get-LocalUser -Name $ServiceUser -ErrorAction SilentlyContinue) {
   New-LocalUser -Name $ServiceUser -Password $secPw -PasswordNeverExpires -UserMayNotChangePassword -Description 'Runs Annapoorna POS' | Out-Null
   Done 'Account created (standard user, not an administrator)'
 }
-& icacls $AppDir /grant "${env:COMPUTERNAME}\${ServiceUser}:(OI)(CI)M" /Q | Out-Null
+# By SID, and with the name Windows itself reports: %COMPUTERNAME% can differ from the
+# account database's name (e.g. a renamed PC not yet restarted), which breaks name lookups.
+$sid = (Get-LocalUser -Name $ServiceUser).SID
+$account = $sid.Translate([Security.Principal.NTAccount]).Value
+& icacls $AppDir /grant "*$($sid.Value):(OI)(CI)M" /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Could not give the service account access to the app folder.' }
-Done "Account can read and write $AppDir"
+Done "Account $account can read and write $AppDir"
 
 # -- Scheduled task --
 Step "Startup task '$TaskName'"
@@ -118,7 +127,7 @@ $trigger = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
   -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings `
-  -User "${env:COMPUTERNAME}\$ServiceUser" -Password $pw -RunLevel Limited `
+  -User $account -Password $pw -RunLevel Limited `
   -Description 'Annapoorna POS (app + built-in database). Logs: data\logs\app.log' | Out-Null
 $pw = $null
 Done 'Registered: starts at boot, restarts after 1 minute if it stops'
