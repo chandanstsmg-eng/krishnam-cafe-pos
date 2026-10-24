@@ -116,6 +116,27 @@ $account = $sid.Translate([Security.Principal.NTAccount]).Value
 if ($LASTEXITCODE -ne 0) { throw 'Could not give the service account access to the app folder.' }
 Done "Account $account can read and write $AppDir"
 
+# A task that runs while nobody is signed in needs "Log on as a batch job". Registering
+# the task from a script doesn't grant it, and without it the task never starts.
+$inf = Join-Path $env:TEMP 'annapoorna-rights.inf'
+$sdb = Join-Path $env:TEMP 'annapoorna-rights.sdb'
+& secedit /export /cfg $inf /areas USER_RIGHTS /quiet | Out-Null
+$rights = [IO.File]::ReadAllText($inf)
+$me = "*$($sid.Value)"
+$line = [regex]::Match($rights, '(?m)^SeBatchLogonRight[ \t]*=[ \t]*([^\r\n]*)')
+if (-not $line.Success) {
+  $rights = $rights.Replace('[Privilege Rights]', "[Privilege Rights]`r`nSeBatchLogonRight = $me")
+} elseif ($line.Groups[1].Value -notmatch [regex]::Escape($me)) {
+  $others = $line.Groups[1].Value.Trim()
+  $rights = $rights.Remove($line.Index, $line.Length).Insert($line.Index, "SeBatchLogonRight = $(if ($others) { "$others,$me" } else { $me })")
+}
+[IO.File]::WriteAllText($inf, $rights, [Text.Encoding]::Unicode)
+& secedit /configure /db $sdb /cfg $inf /areas USER_RIGHTS /quiet | Out-Null
+$ok = $LASTEXITCODE -eq 0
+Remove-Item $inf, $sdb -ErrorAction SilentlyContinue
+if (-not $ok) { throw 'Could not give the service account the "Log on as a batch job" right.' }
+Done 'Account may run as a background task (Log on as a batch job)'
+
 # -- Scheduled task --
 Step "Startup task '$TaskName'"
 if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -132,17 +153,20 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Se
 $pw = $null
 Done 'Registered: starts at boot, restarts after 1 minute if it stops'
 
-Step 'Starting the app (first start builds the screens and the database: 1-3 minutes)'
+Step 'Starting the app (first start builds the screens and the database: 1-5 minutes)'
 Start-ScheduledTask -TaskName $TaskName
 $up = $false
-for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+for ($i = 0; $i -lt 150 -and -not $up; $i++) {
   Start-Sleep 2
   try { $up = (Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:4100/api/health' -TimeoutSec 3).StatusCode -eq 200 } catch {}
 }
 if (-not $up) {
   $info = Get-ScheduledTaskInfo -TaskName $TaskName
-  Write-Host "    The app did not answer yet. Task last result: $($info.LastTaskResult)" -ForegroundColor Yellow
-  Write-Host "    Check $AppDir\data\logs\app.log and data\logs\postgres.log" -ForegroundColor Yellow
+  $task = Get-ScheduledTask -TaskName $TaskName
+  Write-Host "    The app did not answer. Task state: $($task.State), last result: $($info.LastTaskResult) (0x$('{0:X}' -f $info.LastTaskResult))" -ForegroundColor Yellow
+  $log = Join-Path $AppDir 'data\logs\app.log'
+  if (Test-Path $log) { Write-Host '    Last lines of data\logs\app.log:' -ForegroundColor Yellow; Get-Content $log -Tail 15 | ForEach-Object { Write-Host "      $_" } }
+  else { Write-Host '    data\logs\app.log does not exist: the app never started (the task could not run).' -ForegroundColor Yellow }
 } else {
   Done 'App is running on http://127.0.0.1:4100'
   # The owner account exists now; don't leave its password lying in .env.
@@ -171,8 +195,14 @@ if ($Domain) {
   $cf = [IO.File]::ReadAllText($caddyfile).Replace('pos.example.com', $Domain)
   [IO.File]::WriteAllText($caddyfile, $cf)
 }
-& $caddy validate --config $caddyfile --adapter caddyfile 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { & $caddy validate --config $caddyfile --adapter caddyfile; throw "Caddyfile has an error: $caddyfile" }
+# Caddy prints normal "info" lines on stderr; Windows PowerShell would treat them as errors.
+$prevPref = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$check = & $caddy validate --config $caddyfile --adapter caddyfile 2>&1
+$valid = $LASTEXITCODE -eq 0
+$ErrorActionPreference = $prevPref
+if (-not $valid) { $check | ForEach-Object { Write-Host "    $_" }; throw "Caddyfile has an error: $caddyfile" }
+Done 'Caddyfile is valid'
 if (-not (Get-Service caddy -ErrorAction SilentlyContinue)) {
   New-Service -Name caddy -DisplayName 'Caddy (Annapoorna POS https)' -StartupType Automatic `
     -BinaryPathName "`"$caddy`" run --config `"$caddyfile`" --adapter caddyfile" | Out-Null
